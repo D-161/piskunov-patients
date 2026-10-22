@@ -22,6 +22,9 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
         run: |
           set -e
+          
+          B2_KEY_ID=$(printf '%s' "$B2_KEY_ID" | tr -d '\r\n ')
+          B2_APPLICATION_KEY=$(printf '%s' "$B2_APPLICATION_KEY" | tr -d '\r\n ')
 
           AUTH=$(curl -sS -u "$B2_KEY_ID:$B2_APPLICATION_KEY" \
             https://api.backblazeb2.com/b2api/v4/b2_authorize_account)
