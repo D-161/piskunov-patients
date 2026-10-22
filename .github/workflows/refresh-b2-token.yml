@@ -25,7 +25,11 @@ jobs:
 
           AUTH=$(curl -sS -u "$B2_KEY_ID:$B2_APPLICATION_KEY" \
             https://api.backblazeb2.com/b2api/v4/b2_authorize_account)
-
+          if ! echo "$AUTH" | jq -e '.apiInfo.storageApi.apiUrl' >/dev/null; then
+            echo "B2 authorization failed:"
+            echo "$AUTH" | jq '{status, code, message}'
+            exit 1
+          fi
           API_URL=$(echo "$AUTH" | jq -r '.apiInfo.storageApi.apiUrl')
           DOWNLOAD_URL=$(echo "$AUTH" | jq -r '.apiInfo.storageApi.downloadUrl')
           AUTH_TOKEN=$(echo "$AUTH" | jq -r '.authorizationToken')
