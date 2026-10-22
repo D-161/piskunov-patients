@@ -1,0 +1,82 @@
+name: Refresh B2 video token
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 */3 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get fresh B2 token and update video URLs
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+        run: |
+          set -e
+
+          AUTH=$(curl -sS -u "$B2_KEY_ID:$B2_APPLICATION_KEY" \
+            https://api.backblazeb2.com/b2api/v4/b2_authorize_account)
+
+          API_URL=$(echo "$AUTH" | jq -r '.apiInfo.storageApi.apiUrl')
+          DOWNLOAD_URL=$(echo "$AUTH" | jq -r '.apiInfo.storageApi.downloadUrl')
+          AUTH_TOKEN=$(echo "$AUTH" | jq -r '.authorizationToken')
+          BUCKET_ID=$(echo "$AUTH" | jq -r '.apiInfo.storageApi.allowed.buckets[0].id')
+
+          DL_JSON=$(curl -sS -X POST \
+            "$API_URL/b2api/v4/b2_get_download_authorization" \
+            -H "Authorization: $AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"bucketId\":\"$BUCKET_ID\",\"fileNamePrefix\":\"\",\"validDurationInSeconds\":604800}")
+
+          DL_TOKEN=$(echo "$DL_JSON" | jq -r '.authorizationToken')
+
+          export DOWNLOAD_URL DL_TOKEN
+
+          node <<'NODE'
+          const fs = require("fs");
+
+          const file = "index.html";
+          let html = fs.readFileSync(file, "utf8");
+
+          const base = process.env.DOWNLOAD_URL;
+          const token = process.env.DL_TOKEN;
+
+          // Replace old Cloudflare Worker video URLs
+          html = html.replace(
+            /https:\/\/piskunov-video\.dr-piskunov\.workers\.dev\/video\/([^"'\\\s<]+)/g,
+            (_, filename) =>
+              `${base}/file/psknv-video/${filename}?Authorization=${encodeURIComponent(token)}`
+          );
+
+          // Refresh tokens in already-converted B2 URLs
+          html = html.replace(
+            /https:\/\/[^/"']+\.backblazeb2\.com\/file\/psknv-video\/([^?"'\\\s<]+)(?:\?Authorization=[^"'\\\s<]*)?/g,
+            (_, filename) =>
+              `${base}/file/psknv-video/${filename}?Authorization=${encodeURIComponent(token)}`
+          );
+
+          fs.writeFileSync(file, html);
+          NODE
+
+      - name: Commit updated URLs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add index.html
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Refresh B2 video token"
+            git push
+          fi
